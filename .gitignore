@@ -1,0 +1,38 @@
+<<<<<<< HEAD
+backend/.env
+.env
+backend/venv/
+frontend/node_modules/
+__pycache__/
+*.pyc
+*.pem
+=======
+# Secrets
+backend/.env
+.env
+terraform/terraform.tfvars
+*.pem
+*.key
+
+# Terraform
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Runtime/dependencies
+backend/venv/
+__pycache__/
+*.py[cod]
+frontend/node_modules/
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+>>>>>>> f08f857 (terraform changes)

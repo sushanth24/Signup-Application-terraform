@@ -1,0 +1,120 @@
+#!/bin/bash
+set -Eeuo pipefail
+
+exec > >(tee -a /var/log/signup-user-data.log | logger -t signup-user-data -s 2>/dev/console) 2>&1
+
+APP_DIR="/opt/signup-application"
+AWS_REGION="${aws_region}"
+REPO_URL="${github_repo_url}"
+REPO_BRANCH="${github_branch}"
+MONGO_PARAMETER="${mongo_parameter}"
+
+export DEBIAN_FRONTEND=noninteractive
+apt-get update
+apt-get install -y git curl ca-certificates python3 python3-venv python3-pip awscli
+
+# Install Node.js 22 LTS.
+curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+apt-get install -y nodejs
+
+# Fetch application source from the public GitHub repository.
+install -d -o ubuntu -g ubuntu /opt
+if [ -d "$${APP_DIR}/.git" ]; then
+  git -C "$${APP_DIR}" fetch origin
+  git -C "$${APP_DIR}" checkout "$${REPO_BRANCH}"
+  git -C "$${APP_DIR}" reset --hard "origin/$${REPO_BRANCH}"
+else
+  git clone --branch "$${REPO_BRANCH}" --single-branch "$${REPO_URL}" "$${APP_DIR}"
+fi
+chown -R ubuntu:ubuntu "$${APP_DIR}"
+
+# Retrieve MongoDB credentials at boot using the EC2 instance role.
+MONGO_URI=""
+for attempt in $(seq 1 12); do
+  if MONGO_URI="$(aws ssm get-parameter --region "$${AWS_REGION}" --name "$${MONGO_PARAMETER}" --with-decryption --query 'Parameter.Value' --output text 2>/dev/null)"; then
+    if [ -n "$${MONGO_URI}" ] && [ "$${MONGO_URI}" != "None" ]; then
+      break
+    fi
+  fi
+  echo "Waiting for SSM parameter access (attempt $${attempt}/12)..."
+  sleep 10
+done
+if [ -z "$${MONGO_URI}" ] || [ "$${MONGO_URI}" = "None" ]; then
+  echo "MongoDB URI could not be retrieved from SSM Parameter Store" >&2
+  exit 1
+fi
+printf 'MONGO_URI=%s\n' "$${MONGO_URI}" > /etc/signup-backend.env
+chown root:root /etc/signup-backend.env
+chmod 600 /etc/signup-backend.env
+unset MONGO_URI
+
+# Install Flask backend dependencies in an isolated virtual environment.
+python3 -m venv "$${APP_DIR}/backend/venv"
+"$${APP_DIR}/backend/venv/bin/pip" install --upgrade pip
+"$${APP_DIR}/backend/venv/bin/pip" install -r "$${APP_DIR}/backend/requirements.txt"
+
+# Install Express production dependencies.
+cd "$${APP_DIR}/frontend"
+npm ci --omit=dev
+
+# Configure Flask as a systemd service, served by Gunicorn.
+cat > /etc/systemd/system/signup-backend.service <<'UNIT'
+[Unit]
+Description=Signup Flask Backend
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/signup-application/backend
+EnvironmentFile=/etc/signup-backend.env
+ExecStart=/opt/signup-application/backend/venv/bin/gunicorn --workers 1 --threads 2 --bind 127.0.0.1:5000 --timeout 60 app:app
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+# Configure Express as a systemd service.
+cat > /etc/systemd/system/signup-frontend.service <<'UNIT'
+[Unit]
+Description=Signup Express Frontend
+Wants=network-online.target
+After=network-online.target signup-backend.service
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/signup-application/frontend
+Environment=NODE_ENV=production
+Environment=PORT=3000
+Environment=FLASK_URL=http://127.0.0.1:5000
+ExecStart=/usr/bin/node /opt/signup-application/frontend/server.js
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+systemctl daemon-reload
+systemctl enable signup-backend.service signup-frontend.service
+systemctl restart signup-backend.service
+systemctl restart signup-frontend.service
+
+# Wait briefly and fail the user-data run if either service did not start.
+for service in signup-backend signup-frontend; do
+  for attempt in $(seq 1 30); do
+    if systemctl is-active --quiet "$${service}.service"; then
+      break
+    fi
+    sleep 2
+  done
+  systemctl is-active --quiet "$${service}.service"
+done
+
+echo "Signup Application bootstrap completed successfully."

@@ -1,0 +1,8 @@
+Flask
+python-dotenv
+pymongo
+<<<<<<< HEAD
+gunicorn
+=======
+gunicorn
+>>>>>>> f08f857 (terraform changes)

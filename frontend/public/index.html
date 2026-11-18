@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sign Up Form</title>
+</head>
+<body>
+    <p>Hi, welcome to the Signup Page</p>
+    <p>Today is a <span id="day_of_week"></span></p>
+    <p>The Time is <span id="current_time"></span></p>
+
+    <div class="centred">
+        <p id="error" style="color: red; font-size: 16px; display: none;"></p>
+
+        <form id="signupForm">
+            <label for="name">Name</label>
+            <input type="text" name="name" id="name" placeholder="Enter your name" required>
+            <br>
+
+            <label for="password">Password</label>
+            <input type="password" name="password" id="password" placeholder="Enter your password" required>
+            <br>
+
+            <input type="submit" value="Submit">
+        </form>
+    </div>
+
+    <script>
+        function updateDateTime() {
+            const now = new Date();
+            document.getElementById("day_of_week").textContent =
+                now.toLocaleDateString("en-US", { weekday: "long" });
+            document.getElementById("current_time").textContent =
+                now.toLocaleTimeString("en-GB", { hour12: false });
+        }
+
+        updateDateTime();
+
+        const form = document.getElementById("signupForm");
+        const errorElement = document.getElementById("error");
+
+        form.addEventListener("submit", async function (event) {
+            event.preventDefault();
+            errorElement.style.display = "none";
+            errorElement.textContent = "";
+
+            const formData = {
+                name: document.getElementById("name").value,
+                password: document.getElementById("password").value
+            };
+
+            try {
+                const response = await fetch("/submit", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(formData)
+                });
+
+                const result = await response.json();
+
+                if (response.ok && result.success) {
+                    window.location.href = "/success";
+                } else {
+                    errorElement.textContent =
+                        "Error: " + (result.error || "Data submission failed");
+                    errorElement.style.display = "block";
+                }
+            } catch (error) {
+                errorElement.textContent =
+                    "Error: Unable to connect to the server. Please try again.";
+                errorElement.style.display = "block";
+            }
+        });
+    </script>
+</body>
+
+<style>
+    body {
+        background-color: whitesmoke;
+    }
+
+    p {
+        text-align: center;
+        font-size: 30px;
+        font-family: Arial, Helvetica, sans-serif;
+        color: black;
+    }
+
+    .centred {
+        margin: auto;
+        width: 50%;
+        border: 3px solid green;
+        padding: 10px;
+    }
+</style>
+</html>
